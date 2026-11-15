@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { reviewRepository } from "./core.js";
 
 type Args = {
@@ -27,12 +29,11 @@ function parseArgs(argv: string[]): Args {
   return args;
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
+export async function runCli(argv: string[], outputDirectory = process.cwd()): Promise<boolean> {
+  const args = parseArgs(argv);
   if (args.command !== "review" || !args.repositoryPath) {
     console.error("Usage: inspector review --repo <path> [--base-ref <ref>] [--validate <command>]");
-    process.exitCode = 1;
-    return;
+    return false;
   }
 
   const report = await reviewRepository({
@@ -41,11 +42,16 @@ async function main() {
     validationCommands: args.validations,
     format: args.format,
   });
-  writeFileSync("review-report.md", report, "utf8");
-  console.log("Review report written to review-report.md");
+  writeFileSync(join(outputDirectory, "review-report.md"), report, "utf8");
+  return true;
 }
 
-main().catch((error) => {
-  console.error("Fatal error:", error);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  runCli(process.argv.slice(2)).then((success) => {
+    if (success) console.log("Review report written to review-report.md");
+    else process.exitCode = 1;
+  }).catch((error) => {
+    console.error("Fatal error:", error);
+    process.exitCode = 1;
+  });
+}

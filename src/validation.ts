@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ValidationResult } from "./types.js";
@@ -34,12 +34,6 @@ function parseCommand(command: string): { executable: string; args: string[] } {
   return { executable: tokens[0], args: tokens.slice(1) };
 }
 
-function bounded(text: string, maxOutputBytes: number): string {
-  const bytes = Buffer.from(text, "utf8");
-  if (bytes.length <= maxOutputBytes) return text;
-  return `${bytes.subarray(0, maxOutputBytes).toString("utf8")}\n[output truncated at ${maxOutputBytes} bytes]`;
-}
-
 export function runValidation(
   command: string,
   cwd: string,
@@ -61,15 +55,36 @@ export function runValidation(
     if (existsSync(npmCli)) parsed = { executable: process.execPath, args: [npmCli, ...parsed.args] };
   }
   return new Promise((resolve) => {
-    execFile(parsed.executable, parsed.args, {
-      cwd,
-      timeout: timeoutMs,
-      maxBuffer: maxOutputBytes,
-      windowsHide: true,
-    }, (error, stdout, stderr) => {
-      const output = bounded([stdout, stderr, error?.killed ? `Timed out after ${timeoutMs} ms.` : "", error && !error.killed ? `Execution failed: ${error.message}` : ""]
-        .filter(Boolean).join("\n"), maxOutputBytes);
-      resolve({ command, status: error ? "failed" : "passed", output });
+    let outputBytes = 0;
+    let truncated = false;
+    let timedOut = false;
+    let spawnError: Error | undefined;
+    const chunks: Buffer[] = [];
+    const child = spawn(parsed.executable, parsed.args, { cwd, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const capture = (chunk: Buffer) => {
+      const remaining = Math.max(0, maxOutputBytes - outputBytes);
+      if (remaining) {
+        const kept = chunk.subarray(0, remaining);
+        chunks.push(kept);
+        outputBytes += kept.length;
+      }
+      if (chunk.length > remaining) truncated = true;
+    };
+    child.stdout.on("data", capture);
+    child.stderr.on("data", capture);
+    child.on("error", (error) => { spawnError = error; });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, timeoutMs);
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      const parts = [Buffer.concat(chunks).toString("utf8")];
+      if (timedOut) parts.push(`Timed out after ${timeoutMs} ms.`);
+      if (spawnError) parts.push(`Execution failed: ${spawnError.message}`);
+      if (code !== 0 && !timedOut && !spawnError) parts.push(`Process exited with code ${code}.`);
+      if (truncated) parts.push(`[output truncated at ${maxOutputBytes} bytes]`);
+      resolve({ command, status: code === 0 && !timedOut && !spawnError ? "passed" : "failed", output: parts.filter(Boolean).join("\n") });
     });
   });
 }

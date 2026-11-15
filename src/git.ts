@@ -12,12 +12,16 @@ export function changedFiles(repositoryPath: string, baseRef?: string): ChangedF
   const base = baseRef ?? "main";
   const output = git(repositoryPath, ["diff", "--name-status", `${base}...HEAD`]);
 
-  return output
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => {
-      const [code, ...pathParts] = line.split("\t");
-      const status = code === "A" ? "added" : code === "D" ? "deleted" : "modified";
-      return { path: pathParts.join("\t"), status };
-    });
+  const files: ChangedFile[] = [];
+  for (const line of output.split("\n").filter(Boolean)) {
+    const [code, ...paths] = line.split("\t");
+    if (code.startsWith("R") && paths.length === 2) {
+      // ChangedFile has no rename status; preserve both paths as a removal/addition.
+      files.push({ path: paths[0], status: "deleted" }, { path: paths[1], status: "added" });
+      continue;
+    }
+    const status = code === "A" ? "added" : code === "D" ? "deleted" : "modified";
+    files.push({ path: paths.join("\t"), status });
+  }
+  return files;
 }

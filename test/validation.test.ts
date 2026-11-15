@@ -32,4 +32,12 @@ describe("runValidation", () => {
     expect(slow.status).toBe("failed");
     expect(slow.output).toContain("Timed out");
   });
+
+  it("bounds excessive stderr as well as stdout", async () => {
+    const node = `"${process.execPath}"`;
+    const result = await runValidation(`${node} -e "process.stderr.write('e'.repeat(10000))"`, process.cwd(), { maxOutputBytes: 128 });
+    expect(result.status).toBe("passed");
+    expect(result.output).toContain("output truncated at 128 bytes");
+    expect(Buffer.byteLength(result.output)).toBeLessThan(200);
+  });
 });
