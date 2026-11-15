@@ -60,7 +60,7 @@ describe("CLI and MCP observable behavior", () => {
     expect(cliReport).toContain("rename-old\\.txt (deleted)");
     expect(cliReport).toContain("rename-new\\.txt (added)");
     expect(cliReport).toContain("new\\.txt (added)");
-    if (extraPaths.length) expect(cliReport).toContain("odd\\tline\\nbreak.txt (added)");
+    if (extraPaths.length) expect(cliReport).toContain("odd\\tline\\nbreak\\.txt (added)");
     expect(cliReport).not.toContain("untracked.txt");
 
     const previousRoots = process.env.INSPECTOR_ALLOWED_REPOS;
