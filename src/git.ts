@@ -5,23 +5,27 @@ function git(repositoryPath: string, args: string[]): string {
   return execFileSync("git", args, {
     cwd: repositoryPath,
     encoding: "utf8",
-  }).trim();
+  });
 }
 
 export function changedFiles(repositoryPath: string, baseRef?: string): ChangedFile[] {
   const base = baseRef ?? "main";
-  const output = git(repositoryPath, ["diff", "--name-status", `${base}...HEAD`]);
+  if (base.startsWith("-") || /[\0\r\n]/.test(base)) throw new Error("Invalid base ref.");
+  const output = git(repositoryPath, ["diff", "--name-status", "-z", `${base}...HEAD`]);
 
+  const fields = output.split("\0").filter(Boolean);
   const files: ChangedFile[] = [];
-  for (const line of output.split("\n").filter(Boolean)) {
-    const [code, ...paths] = line.split("\t");
-    if (code.startsWith("R") && paths.length === 2) {
-      // ChangedFile has no rename status; preserve both paths as a removal/addition.
-      files.push({ path: paths[0], status: "deleted" }, { path: paths[1], status: "added" });
+  for (let index = 0; index < fields.length;) {
+    const code = fields[index++];
+    const path = fields[index++];
+    if (!code || path === undefined) throw new Error("Git returned malformed name-status output.");
+    if (code.startsWith("R") && index < fields.length) {
+      // ChangedFile has no rename status; preserve both paths as removal/addition.
+      files.push({ path, status: "deleted" }, { path: fields[index++], status: "added" });
       continue;
     }
     const status = code === "A" ? "added" : code === "D" ? "deleted" : "modified";
-    files.push({ path: paths.join("\t"), status });
+    files.push({ path, status });
   }
   return files;
 }

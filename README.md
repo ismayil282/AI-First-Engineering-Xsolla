@@ -53,6 +53,8 @@ npm run inspector -- review --repo ./path/to/repo --validate "npm test"
 ```
 
 The report is written to `review-report.md`.
+Repository changes are the committed diff from `<base-ref>...HEAD` (default
+base `main`). Staged, unstaged, and untracked working-tree files are not included.
 
 ## MCP
 
@@ -67,10 +69,17 @@ its current input contract and whether it is suitable for the production model
 you propose.
 
 The MCP tool accepts `repo_path` and optional `baseRef` and performs repository
-inspection only. It does not run validation commands. The CLI can run explicitly
+inspection only. It does not run validation commands. By default, MCP may inspect
+repositories under the server's current working directory. Set
+`INSPECTOR_ALLOWED_REPOS` to a platform-separated list of allowed directory roots
+to change that boundary; both the symlink-resolved path and Git-discovered worktree
+root must remain inside an allowed root.
+The CLI can run explicitly
 requested local validation commands with `--validate`; these execute as the
 current user and are not sandboxed. They are launched without a shell, accept a
-command and quoted arguments, have a 30-second timeout, and report bounded output.
+command and quoted arguments, have a 30-second timeout, and report up to 64 KiB
+of combined output per command. This limits captured output; it does not sandbox
+the validation process.
 
 ## Project layout
 

@@ -1,6 +1,7 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
+import type { Readable } from "node:stream";
 import type { ValidationResult } from "./types.js";
 
 const TIMEOUT_MS = 30_000;
@@ -30,7 +31,7 @@ function parseCommand(command: string): { executable: string; args: string[] } {
   }
   if (quote) throw new Error("Unclosed quote in validation command.");
   if (started) tokens.push(token);
-  if (!tokens.length) throw new Error("Validation command must not be empty.");
+  if (!tokens.length || !tokens[0]) throw new Error("Validation command must not be empty.");
   return { executable: tokens[0], args: tokens.slice(1) };
 }
 
@@ -60,7 +61,20 @@ export function runValidation(
     let timedOut = false;
     let spawnError: Error | undefined;
     const chunks: Buffer[] = [];
-    const child = spawn(parsed.executable, parsed.args, { cwd, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    let child: ChildProcessByStdio<null, Readable, Readable>;
+    try {
+      child = spawn(parsed.executable, parsed.args, {
+        cwd,
+        windowsHide: true,
+        detached: process.platform !== "win32",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (error) {
+      resolve({ command, status: "failed", output: `Execution failed: ${String(error)}` });
+      return;
+    }
+    let settled = false;
+    let timer: NodeJS.Timeout;
     const capture = (chunk: Buffer) => {
       const remaining = Math.max(0, maxOutputBytes - outputBytes);
       if (remaining) {
@@ -70,14 +84,9 @@ export function runValidation(
       }
       if (chunk.length > remaining) truncated = true;
     };
-    child.stdout.on("data", capture);
-    child.stderr.on("data", capture);
-    child.on("error", (error) => { spawnError = error; });
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill();
-    }, timeoutMs);
-    child.on("close", (code) => {
+    const finish = (code: number | null) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       const parts = [Buffer.concat(chunks).toString("utf8")];
       if (timedOut) parts.push(`Timed out after ${timeoutMs} ms.`);
@@ -85,7 +94,26 @@ export function runValidation(
       if (code !== 0 && !timedOut && !spawnError) parts.push(`Process exited with code ${code}.`);
       if (truncated) parts.push(`[output truncated at ${maxOutputBytes} bytes]`);
       resolve({ command, status: code === 0 && !timedOut && !spawnError ? "passed" : "failed", output: parts.filter(Boolean).join("\n") });
-    });
+    };
+    child.stdout.on("data", capture);
+    child.stderr.on("data", capture);
+    child.on("error", (error) => { spawnError = error; });
+    timer = setTimeout(() => {
+      timedOut = true;
+      if (child.pid && process.platform !== "win32") {
+        try { process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); }
+      } else if (child.pid && process.platform === "win32") {
+        try {
+          const killer = spawn("taskkill.exe", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, stdio: "ignore" });
+          killer.on("error", () => child.kill("SIGKILL"));
+          killer.on("close", (code) => { if (code !== 0) child.kill("SIGKILL"); });
+        } catch {
+          child.kill("SIGKILL");
+        }
+      } else child.kill("SIGKILL");
+      finish(null);
+    }, timeoutMs);
+    child.on("close", finish);
   });
 }
 
