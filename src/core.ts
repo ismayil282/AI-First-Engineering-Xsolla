@@ -15,3 +15,12 @@ export async function reviewRepository(request: ReviewRequest): Promise<string> 
     validationResults: validations,
   });
 }
+
+export function inspectRepository(request: Pick<ReviewRequest, "repositoryPath" | "baseRef">): string {
+  const files = changedFiles(request.repositoryPath, request.baseRef);
+  return markdownReport({
+    repositoryPath: request.repositoryPath,
+    changedFiles: files,
+    validationResults: [],
+  });
+}

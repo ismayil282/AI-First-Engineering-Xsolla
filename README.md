@@ -66,6 +66,12 @@ It exposes a `review_repository` tool. Inspect the implementation to determine
 its current input contract and whether it is suitable for the production model
 you propose.
 
+The MCP tool accepts `repo_path` and optional `baseRef` and performs repository
+inspection only. It does not run validation commands. The CLI can run explicitly
+requested local validation commands with `--validate`; these execute as the
+current user and are not sandboxed. They are launched without a shell, accept a
+command and quoted arguments, have a 30-second timeout, and report bounded output.
+
 ## Project layout
 
 ```text
